@@ -13,8 +13,20 @@ const (
 	userID = "0-0-0-0-0"
 )
 
+var (
+	limit = Limit{
+		Limit: Rate{
+			Value:    1,
+			Interval: time.Second,
+		},
+		Refill: Rate{
+			Value:    1,
+			Interval: 2 * time.Second,
+		},
+	}
+)
+
 func Test_ServerReturns401_IfUserIsUnknown(t *testing.T) {
-	limit := 1
 	rl := RateLimiter{}
 	rl.SetLimit(route, limit)
 
@@ -28,7 +40,6 @@ func Test_ServerReturns401_IfUserIsUnknown(t *testing.T) {
 }
 
 func Test_ServerReturns200_WhenWithinLimits(t *testing.T) {
-	limit := 1
 	rl := RateLimiter{}
 	rl.SetLimit(route, limit).RegisterUser(userID)
 
@@ -42,7 +53,6 @@ func Test_ServerReturns200_WhenWithinLimits(t *testing.T) {
 }
 
 func Test_ServerReturns200_AfterRefill(t *testing.T) {
-	limit := 1
 	rl := RateLimiter{}
 	rl.SetLimit(route, limit).RegisterUser(userID)
 
@@ -54,7 +64,7 @@ func Test_ServerReturns200_AfterRefill(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 
 	res, err = sendRequest(server.URL+route, client)
 
@@ -63,7 +73,6 @@ func Test_ServerReturns200_AfterRefill(t *testing.T) {
 }
 
 func Test_ServerReturns429_OnTooManyRequests(t *testing.T) {
-	limit := 1
 	rl := RateLimiter{}
 	rl.SetLimit(route, limit).RegisterUser(userID)
 

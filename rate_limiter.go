@@ -1,47 +1,61 @@
 package rate_limiter
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 )
 
-type RateLimiter struct {
-	pathLimits map[string]int
-	userQuotas map[string]map[string]int
-}
+type (
+	Path   string
+	UserID string
 
-func (rl *RateLimiter) SetLimit(path string, limit int) *RateLimiter {
-	if rl.pathLimits == nil {
-		rl.pathLimits = make(map[string]int)
+	Rate struct {
+		Value    int
+		Interval time.Duration
 	}
-	rl.pathLimits[path] = limit
+
+	Limit struct {
+		Limit  Rate
+		Refill Rate
+	}
+
+	RateLimiter struct {
+		pathLimits map[Path]Limit
+		userQuotas map[UserID]map[Path]int
+	}
+)
+
+func (rl *RateLimiter) SetLimit(path string, limit Limit) *RateLimiter {
+	if rl.pathLimits == nil {
+		rl.pathLimits = make(map[Path]Limit)
+	}
+	rl.pathLimits[Path(path)] = limit
 
 	return rl
 }
 
 func (rl *RateLimiter) RegisterUser(ID string) *RateLimiter {
 	if rl.userQuotas == nil {
-		rl.userQuotas = make(map[string]map[string]int)
+		rl.userQuotas = make(map[UserID]map[Path]int)
 	}
 
 	for path, limit := range rl.pathLimits {
-		quotas := rl.userQuotas[ID]
+		quotas := rl.userQuotas[UserID(ID)]
 
 		if quotas == nil {
-			quotas = make(map[string]int)
-			rl.userQuotas[ID] = quotas
+			quotas = make(map[Path]int)
+			rl.userQuotas[UserID(ID)] = quotas
 		}
 
-		quotas[path] = limit
+		quotas[path] = limit.Limit.Value
 	}
 
 	return rl
 }
 
 func (rl *RateLimiter) GetQuota(userID string, path string) (int, bool) {
-	if user, exists := rl.userQuotas[userID]; exists {
-		if quota, exists := user[path]; exists {
+	if user, exists := rl.userQuotas[UserID(userID)]; exists {
+		if quota, exists := user[Path(path)]; exists {
 			return quota, true
 		}
 	}
@@ -50,18 +64,22 @@ func (rl *RateLimiter) GetQuota(userID string, path string) (int, bool) {
 }
 
 func (rl *RateLimiter) DecrQuota(userID string, path string) {
-	user := rl.userQuotas[userID]
+	user := rl.userQuotas[UserID(userID)]
 
-	if user[path] > 0 {
-		user[path] -= 1
+	if user[Path(path)] > 0 {
+		user[Path(path)] -= 1
 	}
 }
 
-func (rl *RateLimiter) ResetQuotas() {
-	fmt.Println("Resetting quotas")
+func (rl *RateLimiter) RefillQuotas() {
 	for _, quotas := range rl.userQuotas {
-		for path, _ := range quotas {
-			quotas[path] = rl.pathLimits[path]
+		for path, current := range quotas {
+			limit := rl.pathLimits[path]
+			if current+limit.Refill.Value > limit.Limit.Value {
+				quotas[path] = limit.Limit.Value
+			} else {
+				quotas[path] = current + limit.Refill.Value
+			}
 		}
 	}
 }
@@ -73,7 +91,7 @@ func (rl *RateLimiter) Refill(interval time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
-			rl.ResetQuotas()
+			rl.RefillQuotas()
 		default:
 		}
 	}

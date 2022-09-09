@@ -9,12 +9,30 @@ import (
 )
 
 const (
-	route = "/bar"
+	route  = "/bar"
+	userID = "0-0-0-0-0"
 )
+
+func Test_ServerReturns401_IfUserIsUnknown(t *testing.T) {
+	limit := 1
+	rl := RateLimiter{}
+	rl.SetLimit(route, limit)
+
+	server := httptest.NewServer(rl.RateLimit(itsOK()))
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	res, err := sendRequest(server.URL+route, client)
+
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
+}
 
 func Test_ServerReturns200_WhenWithinLimits(t *testing.T) {
 	limit := 1
-	server := httptest.NewServer(RateLimit(route, limit, http.NotFoundHandler()))
+	rl := RateLimiter{}
+	rl.SetLimit(route, limit).RegisterUser(userID)
+
+	server := httptest.NewServer(rl.RateLimit(itsOK()))
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	res, err := sendRequest(server.URL+route, client)
@@ -24,7 +42,11 @@ func Test_ServerReturns200_WhenWithinLimits(t *testing.T) {
 }
 
 func Test_ServerReturns429_OnTooManyRequests(t *testing.T) {
-	server := httptest.NewServer(RateLimit(route, 1, http.NotFoundHandler()))
+	limit := 1
+	rl := RateLimiter{}
+	rl.SetLimit(route, limit).RegisterUser(userID)
+
+	server := httptest.NewServer(rl.RateLimit(itsOK()))
 
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -39,7 +61,14 @@ func Test_ServerReturns429_OnTooManyRequests(t *testing.T) {
 
 func sendRequest(route string, client *http.Client) (*http.Response, error) {
 	req, _ := http.NewRequest("GET", route, nil)
-	req.Header.Set("X-User-ID", "123")
+	req.Header.Set("X-User-ID", userID)
 
 	return client.Do(req)
+}
+
+func itsOK() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		return
+	})
 }

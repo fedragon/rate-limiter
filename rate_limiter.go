@@ -1,7 +1,9 @@
 package rate_limiter
 
 import (
+	"fmt"
 	"net/http"
+	"time"
 )
 
 type RateLimiter struct {
@@ -55,7 +57,31 @@ func (rl *RateLimiter) DecrQuota(userID string, path string) {
 	}
 }
 
-func (rl *RateLimiter) RateLimit(next http.Handler) http.Handler {
+func (rl *RateLimiter) ResetQuotas() {
+	fmt.Println("Resetting quotas")
+	for _, quotas := range rl.userQuotas {
+		for path, _ := range quotas {
+			quotas[path] = rl.pathLimits[path]
+		}
+	}
+}
+
+func (rl *RateLimiter) Refill(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			rl.ResetQuotas()
+		default:
+		}
+	}
+}
+
+func (rl *RateLimiter) RateLimit(refillRate time.Duration, next http.Handler) http.Handler {
+	go rl.Refill(refillRate)
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID := r.Header.Get("X-User-ID")
 		quota, exists := rl.GetQuota(userID, r.URL.Path)

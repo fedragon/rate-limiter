@@ -18,7 +18,7 @@ func Test_ServerReturns401_IfUserIsUnknown(t *testing.T) {
 	rl := RateLimiter{}
 	rl.SetLimit(route, limit)
 
-	server := httptest.NewServer(rl.RateLimit(itsOK()))
+	server := httptest.NewServer(rl.RateLimit(time.Second, itsOK()))
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	res, err := sendRequest(server.URL+route, client)
@@ -32,10 +32,31 @@ func Test_ServerReturns200_WhenWithinLimits(t *testing.T) {
 	rl := RateLimiter{}
 	rl.SetLimit(route, limit).RegisterUser(userID)
 
-	server := httptest.NewServer(rl.RateLimit(itsOK()))
+	server := httptest.NewServer(rl.RateLimit(time.Second, itsOK()))
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	res, err := sendRequest(server.URL+route, client)
+
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func Test_ServerReturns200_AfterRefill(t *testing.T) {
+	limit := 1
+	rl := RateLimiter{}
+	rl.SetLimit(route, limit).RegisterUser(userID)
+
+	server := httptest.NewServer(rl.RateLimit(time.Second, itsOK()))
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	res, err := sendRequest(server.URL+route, client)
+
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+
+	time.Sleep(2 * time.Second)
+
+	res, err = sendRequest(server.URL+route, client)
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -46,7 +67,7 @@ func Test_ServerReturns429_OnTooManyRequests(t *testing.T) {
 	rl := RateLimiter{}
 	rl.SetLimit(route, limit).RegisterUser(userID)
 
-	server := httptest.NewServer(rl.RateLimit(itsOK()))
+	server := httptest.NewServer(rl.RateLimit(time.Second, itsOK()))
 
 	client := &http.Client{Timeout: 5 * time.Second}
 

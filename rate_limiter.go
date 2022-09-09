@@ -1,6 +1,8 @@
 package rate_limiter
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -19,43 +21,72 @@ type (
 		Refill Rate
 	}
 
+	RateLimiterBuilder struct {
+		pathLimits map[Path]Limit
+		users      map[UserID]struct{}
+	}
+
 	RateLimiter struct {
 		pathLimits map[Path]Limit
 		userQuotas map[UserID]map[Path]int
+		cancel     context.CancelFunc
 	}
 )
 
-func (rl *RateLimiter) SetLimit(path string, limit Limit) *RateLimiter {
-	if rl.pathLimits == nil {
-		rl.pathLimits = make(map[Path]Limit)
+func (b *RateLimiterBuilder) SetLimit(path string, limit Limit) *RateLimiterBuilder {
+	if b.pathLimits == nil {
+		b.pathLimits = make(map[Path]Limit)
 	}
-	rl.pathLimits[Path(path)] = limit
+	b.pathLimits[Path(path)] = limit
 
-	return rl
+	return b
 }
 
-func (rl *RateLimiter) RegisterUser(ID string) *RateLimiter {
-	if rl.userQuotas == nil {
-		rl.userQuotas = make(map[UserID]map[Path]int)
+func (b *RateLimiterBuilder) RegisterUser(ID string) *RateLimiterBuilder {
+	if b.users == nil {
+		b.users = make(map[UserID]struct{})
 	}
 
-	for path, limit := range rl.pathLimits {
-		quotas := rl.userQuotas[UserID(ID)]
+	b.users[UserID(ID)] = struct{}{}
 
-		if quotas == nil {
-			quotas = make(map[Path]int)
-			rl.userQuotas[UserID(ID)] = quotas
+	return b
+}
+
+func (b *RateLimiterBuilder) Build() *RateLimiter {
+	ctx, cancel := context.WithCancel(context.Background())
+	rl := RateLimiter{
+		pathLimits: b.pathLimits,
+		userQuotas: make(map[UserID]map[Path]int),
+		cancel:     cancel,
+	}
+
+	for u, _ := range b.users {
+		for p, v := range b.pathLimits {
+			uqs := rl.userQuotas[u]
+
+			if uqs == nil {
+				uqs = make(map[Path]int)
+				rl.userQuotas[u] = uqs
+			}
+
+			uqs[p] = v.Limit.Value
 		}
-
-		quotas[path] = limit.Limit.Value
 	}
 
-	return rl
+	for p, v := range b.pathLimits {
+		go rl.refill(ctx, p, v)
+	}
+
+	return &rl
 }
 
-func (rl *RateLimiter) GetQuota(userID string, path string) (int, bool) {
-	if user, exists := rl.userQuotas[UserID(userID)]; exists {
-		if quota, exists := user[Path(path)]; exists {
+func (rl *RateLimiter) Stop() {
+	rl.cancel()
+}
+
+func (rl *RateLimiter) GetQuota(userID UserID, path Path) (int, bool) {
+	if user, exists := rl.userQuotas[userID]; exists {
+		if quota, exists := user[path]; exists {
 			return quota, true
 		}
 	}
@@ -63,46 +94,49 @@ func (rl *RateLimiter) GetQuota(userID string, path string) (int, bool) {
 	return 0, false
 }
 
-func (rl *RateLimiter) DecrQuota(userID string, path string) {
-	user := rl.userQuotas[UserID(userID)]
+func (rl *RateLimiter) DecrQuota(userID UserID, path Path) {
+	user := rl.userQuotas[userID]
 
-	if user[Path(path)] > 0 {
-		user[Path(path)] -= 1
+	if user[path] > 0 {
+		user[path] -= 1
 	}
 }
 
-func (rl *RateLimiter) RefillQuotas() {
+func (rl *RateLimiter) refillQuotas(path Path, value int, max int) {
 	for _, quotas := range rl.userQuotas {
-		for path, current := range quotas {
-			limit := rl.pathLimits[path]
-			if current+limit.Refill.Value > limit.Limit.Value {
-				quotas[path] = limit.Limit.Value
-			} else {
-				quotas[path] = current + limit.Refill.Value
-			}
+		current := quotas[path]
+		next := current + value
+		if next > max {
+			next = max
 		}
+
+		quotas[path] = max
 	}
 }
 
-func (rl *RateLimiter) Refill(interval time.Duration) {
-	ticker := time.NewTicker(interval)
+func (rl *RateLimiter) refill(ctx context.Context, path Path, limit Limit) {
+	ticker := time.NewTicker(limit.Limit.Interval)
 	defer ticker.Stop()
+
+	fmt.Printf("starting refiller for path '%v'\n", path)
 
 	for {
 		select {
+		case <-ctx.Done():
+			fmt.Printf("stopping refiller for path '%v'\n", path)
+			return
 		case <-ticker.C:
-			rl.RefillQuotas()
+			rl.refillQuotas(path, limit.Refill.Value, limit.Limit.Value)
 		default:
 		}
 	}
 }
 
-func (rl *RateLimiter) RateLimit(refillRate time.Duration, next http.Handler) http.Handler {
-	go rl.Refill(refillRate)
-
+func (rl *RateLimiter) RateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID := r.Header.Get("X-User-ID")
-		quota, exists := rl.GetQuota(userID, r.URL.Path)
+		userID := UserID(r.Header.Get("X-User-ID"))
+		path := Path(r.URL.Path)
+		quota, exists := rl.GetQuota(userID, path)
 		if !exists {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -113,7 +147,7 @@ func (rl *RateLimiter) RateLimit(refillRate time.Duration, next http.Handler) ht
 			return
 		}
 
-		rl.DecrQuota(userID, r.URL.Path)
+		rl.DecrQuota(userID, path)
 
 		next.ServeHTTP(w, r)
 	})

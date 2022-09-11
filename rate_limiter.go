@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -29,6 +30,7 @@ type (
 	RateLimiter struct {
 		pathLimits map[Path]Limit
 		userQuotas map[UserID]map[Path]int
+		mux        sync.RWMutex
 		cancel     context.CancelFunc
 	}
 )
@@ -85,6 +87,8 @@ func (rl *RateLimiter) Stop() {
 }
 
 func (rl *RateLimiter) GetQuota(userID UserID, path Path) (int, bool) {
+	rl.mux.RLock()
+	defer rl.mux.RUnlock()
 	if user, exists := rl.userQuotas[userID]; exists {
 		if quota, exists := user[path]; exists {
 			return quota, true
@@ -95,6 +99,8 @@ func (rl *RateLimiter) GetQuota(userID UserID, path Path) (int, bool) {
 }
 
 func (rl *RateLimiter) DecrQuota(userID UserID, path Path) {
+	rl.mux.Lock()
+	defer rl.mux.Unlock()
 	user := rl.userQuotas[userID]
 
 	if user[path] > 0 {
@@ -103,6 +109,8 @@ func (rl *RateLimiter) DecrQuota(userID UserID, path Path) {
 }
 
 func (rl *RateLimiter) refillQuotas(path Path, value int, max int) {
+	rl.mux.Lock()
+	defer rl.mux.Unlock()
 	for _, quotas := range rl.userQuotas {
 		current := quotas[path]
 		next := current + value

@@ -35,6 +35,7 @@ func Test_ServerReturns401_IfUserIsUnknown(t *testing.T) {
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	res, err := sendRequest(server.URL+route, client)
+	defer res.Body.Close()
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
@@ -49,6 +50,7 @@ func Test_ServerReturns200_WhenWithinLimits(t *testing.T) {
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	res, err := sendRequest(server.URL+route, client)
+	defer res.Body.Close()
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -63,6 +65,7 @@ func Test_ServerReturns200_AfterRefill(t *testing.T) {
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	res, err := sendRequest(server.URL+route, client)
+	defer res.Body.Close()
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -70,6 +73,7 @@ func Test_ServerReturns200_AfterRefill(t *testing.T) {
 	time.Sleep(3 * time.Second)
 
 	res, err = sendRequest(server.URL+route, client)
+	defer res.Body.Close()
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -85,10 +89,12 @@ func Test_ServerReturns429_OnTooManyRequests(t *testing.T) {
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	res, err := sendRequest(server.URL+route, client)
+	defer res.Body.Close()
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 
 	res, err = sendRequest(server.URL+route, client)
+	defer res.Body.Close()
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusTooManyRequests, res.StatusCode)
 }

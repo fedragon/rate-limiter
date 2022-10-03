@@ -1,9 +1,10 @@
-package rate_limiter
+package token_bucket
 
 import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -150,6 +151,7 @@ func (rl *RateLimiter) RateLimit(next http.Handler) http.Handler {
 			return
 		}
 
+		w.Header().Add("X-Ratelimit-Remaining", strconv.Itoa(quota))
 		if quota == 0 {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return

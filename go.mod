@@ -1,4 +1,4 @@
-module rate-limiter
+module github.com/fedragon/rate-limiter
 
 go 1.19
 

@@ -87,7 +87,7 @@ func (rl *RateLimiter) Stop() {
 	rl.cancel()
 }
 
-func (rl *RateLimiter) GetQuota(userID UserID, path Path) (int, bool) {
+func (rl *RateLimiter) getQuota(userID UserID, path Path) (int, bool) {
 	rl.mux.RLock()
 	defer rl.mux.RUnlock()
 	if user, exists := rl.userQuotas[userID]; exists {
@@ -99,7 +99,7 @@ func (rl *RateLimiter) GetQuota(userID UserID, path Path) (int, bool) {
 	return 0, false
 }
 
-func (rl *RateLimiter) DecrQuota(userID UserID, path Path) {
+func (rl *RateLimiter) decrQuota(userID UserID, path Path) {
 	rl.mux.Lock()
 	defer rl.mux.Unlock()
 	user := rl.userQuotas[userID]
@@ -107,6 +107,10 @@ func (rl *RateLimiter) DecrQuota(userID UserID, path Path) {
 	if user[path] > 0 {
 		user[path] -= 1
 	}
+}
+
+func (rl *RateLimiter) getRefillInterval(path Path) time.Duration {
+	return rl.pathLimits[path].Refill.Interval
 }
 
 func (rl *RateLimiter) refillQuotas(path Path, value int, max int) {
@@ -145,19 +149,21 @@ func (rl *RateLimiter) RateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID := UserID(r.Header.Get("X-User-ID"))
 		path := Path(r.URL.Path)
-		quota, exists := rl.GetQuota(userID, path)
+		quota, exists := rl.getQuota(userID, path)
 		if !exists {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
+		retryAfter := rl.getRefillInterval(path)
 		w.Header().Add("X-Ratelimit-Remaining", strconv.Itoa(quota))
+		w.Header().Add("X-Ratelimit-Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
 		if quota == 0 {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}
 
-		rl.DecrQuota(userID, path)
+		rl.decrQuota(userID, path)
 
 		next.ServeHTTP(w, r)
 	})

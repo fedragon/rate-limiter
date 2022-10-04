@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fedragon/rate-limiter/common"
 	"github.com/fedragon/rate-limiter/concurrent"
 )
 
@@ -16,14 +17,9 @@ type (
 	Path   string
 	UserID string
 
-	Rate struct {
-		Value    int
-		Interval time.Duration
-	}
-
 	Limit struct {
-		Limit  Rate
-		Refill Rate
+		Limit  common.Rate
+		Refill common.Rate
 	}
 
 	// RateLimiterBuilder builds a rate limiter.

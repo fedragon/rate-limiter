@@ -1,3 +1,3 @@
 # rate-limiter
 
-Implementations of some rate-limiting algorithm as HTTP middleware, for fun & learning.
+Implementations of some rate-limiting algorithms as HTTP middleware, for fun & learning.

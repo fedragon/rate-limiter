@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fedragon/rate-limiter/common"
+	"github.com/fedragon/rate-limiter/test"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -16,11 +18,11 @@ const (
 
 var (
 	limit = Limit{
-		Limit: Rate{
+		Limit: common.Rate{
 			Value:    1,
 			Interval: time.Second,
 		},
-		Refill: Rate{
+		Refill: common.Rate{
 			Value:    1,
 			Interval: 2 * time.Second,
 		},
@@ -40,14 +42,13 @@ func Test_ServerReturns401_IfUserIsUnknown(t *testing.T) {
 	rl, _ := rlb.SetLimit(route, limit).Build()
 	defer rl.Stop()
 
-	server := httptest.NewServer(rl.Handle(itsOK()))
+	server := httptest.NewServer(rl.Handle(test.ItsOK()))
 
 	client := &http.Client{Timeout: 5 * time.Second}
-	res, err := sendRequest(server.URL+route, client)
-	defer res.Body.Close()
+	statusCode, err := sendRequest(server.URL+route, client)
 
 	assert.NoError(t, err)
-	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
+	assert.Equal(t, http.StatusUnauthorized, statusCode)
 }
 
 func Test_ServerReturns200_WhenWithinLimits(t *testing.T) {
@@ -55,14 +56,13 @@ func Test_ServerReturns200_WhenWithinLimits(t *testing.T) {
 	rl, _ := rlb.SetLimit(route, limit).RegisterUser(userID).Build()
 	defer rl.Stop()
 
-	server := httptest.NewServer(rl.Handle(itsOK()))
+	server := httptest.NewServer(rl.Handle(test.ItsOK()))
 
 	client := &http.Client{Timeout: 5 * time.Second}
-	res, err := sendRequest(server.URL+route, client)
-	defer res.Body.Close()
+	statusCode, err := sendRequest(server.URL+route, client)
 
 	assert.NoError(t, err)
-	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, http.StatusOK, statusCode)
 }
 
 func Test_ServerReturns200_AfterRefill(t *testing.T) {
@@ -70,22 +70,20 @@ func Test_ServerReturns200_AfterRefill(t *testing.T) {
 	rl, _ := rlb.SetLimit(route, limit).RegisterUser(userID).Build()
 	defer rl.Stop()
 
-	server := httptest.NewServer(rl.Handle(itsOK()))
+	server := httptest.NewServer(rl.Handle(test.ItsOK()))
 
 	client := &http.Client{Timeout: 5 * time.Second}
-	res, err := sendRequest(server.URL+route, client)
-	defer res.Body.Close()
+	statusCode, err := sendRequest(server.URL+route, client)
 
 	assert.NoError(t, err)
-	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, http.StatusOK, statusCode)
 
 	time.Sleep(3 * time.Second)
 
-	res, err = sendRequest(server.URL+route, client)
-	defer res.Body.Close()
+	statusCode, err = sendRequest(server.URL+route, client)
 
 	assert.NoError(t, err)
-	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, http.StatusOK, statusCode)
 }
 
 func Test_ServerReturns429_OnTooManyRequests(t *testing.T) {
@@ -93,31 +91,24 @@ func Test_ServerReturns429_OnTooManyRequests(t *testing.T) {
 	rl, _ := rlb.SetLimit(route, limit).RegisterUser(userID).Build()
 	defer rl.Stop()
 
-	server := httptest.NewServer(rl.Handle(itsOK()))
+	server := httptest.NewServer(rl.Handle(test.ItsOK()))
 
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	res, err := sendRequest(server.URL+route, client)
-	defer res.Body.Close()
+	statusCode, err := sendRequest(server.URL+route, client)
 	assert.NoError(t, err)
-	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, http.StatusOK, statusCode)
 
-	res, err = sendRequest(server.URL+route, client)
-	defer res.Body.Close()
+	statusCode, err = sendRequest(server.URL+route, client)
 	assert.NoError(t, err)
-	assert.Equal(t, http.StatusTooManyRequests, res.StatusCode)
+	assert.Equal(t, http.StatusTooManyRequests, statusCode)
 }
 
-func sendRequest(route string, client *http.Client) (*http.Response, error) {
+func sendRequest(route string, client *http.Client) (int, error) {
 	req, _ := http.NewRequest("GET", route, nil)
 	req.Header.Set("X-User-ID", userID)
 
-	return client.Do(req)
-}
-
-func itsOK() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		return
-	})
+	res, err := client.Do(req)
+	defer res.Body.Close()
+	return res.StatusCode, err
 }

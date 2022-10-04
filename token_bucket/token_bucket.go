@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/fedragon/rate-limiter/concurrent"
@@ -25,18 +26,25 @@ type (
 		Refill Rate
 	}
 
+	// RateLimiterBuilder builds a rate limiter.
 	RateLimiterBuilder struct {
 		pathLimits *concurrent.Map[Path, Limit]
 		users      *concurrent.Set[UserID]
 	}
 
+	// RateLimiter acts as an HTTP middleware that applies rate limits on configured endpoints.
+	// It starts one or more goroutine that manage the refilling of tokens as soon as the first HTTP request has been
+	// intercepted by its middleware; the refilling goroutines need to be explicitly stopped by invoking the Stop()
+	// method during the HTTP server shutdown process.
 	RateLimiter struct {
 		pathLimits *concurrent.Map[Path, Limit]
 		userQuotas *concurrent.Map[UserID, *concurrent.Map[Path, int]]
 		cancel     context.CancelFunc
+		once       sync.Once
 	}
 )
 
+// SetLimit sets a limit on a path. The path needs to be absolute and should start with a leading '/'.
 func (b *RateLimiterBuilder) SetLimit(path string, limit Limit) *RateLimiterBuilder {
 	if b.pathLimits == nil {
 		b.pathLimits = concurrent.NewMap[Path, Limit]()
@@ -46,6 +54,7 @@ func (b *RateLimiterBuilder) SetLimit(path string, limit Limit) *RateLimiterBuil
 	return b
 }
 
+// RegisterUser registers a user.
 func (b *RateLimiterBuilder) RegisterUser(ID string) *RateLimiterBuilder {
 	if b.users == nil {
 		b.users = concurrent.NewSet[UserID]()
@@ -56,18 +65,16 @@ func (b *RateLimiterBuilder) RegisterUser(ID string) *RateLimiterBuilder {
 	return b
 }
 
+// Build builds a rate limiter, setting quotas for each configured user and path.
+// It returns an error if no limits have been configured.
 func (b *RateLimiterBuilder) Build() (*RateLimiter, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-
 	if b.pathLimits == nil {
-		cancel()
 		return nil, errors.New("no rate limits configured")
 	}
 
 	rl := RateLimiter{
 		pathLimits: b.pathLimits,
 		userQuotas: concurrent.NewMap[UserID, *concurrent.Map[Path, int]](),
-		cancel:     cancel,
 	}
 
 	if b.users == nil {
@@ -87,13 +94,10 @@ func (b *RateLimiterBuilder) Build() (*RateLimiter, error) {
 		})
 	})
 
-	b.pathLimits.ForEach(func(p Path, v Limit) {
-		go rl.refill(ctx, p, v)
-	})
-
 	return &rl, nil
 }
 
+// Stop stops the refilling goroutines.
 func (rl *RateLimiter) Stop() {
 	rl.cancel()
 }
@@ -117,13 +121,14 @@ func (rl *RateLimiter) decrQuota(userID UserID, path Path) {
 	}
 }
 
-func (rl *RateLimiter) getRefillInterval(path Path) time.Duration {
+func (rl *RateLimiter) getRefillInterval(path Path) (time.Duration, error) {
 	limit, ok := rl.pathLimits.Get(path)
 
 	if !ok {
-		return 0
+		return 0, fmt.Errorf("unknown path: %v", path)
 	}
-	return limit.Refill.Interval
+
+	return limit.Refill.Interval, nil
 }
 
 func (rl *RateLimiter) refillQuotas(path Path, value int, max int) {
@@ -156,7 +161,18 @@ func (rl *RateLimiter) refill(ctx context.Context, path Path, limit Limit) {
 	}
 }
 
+// RateLimit is an HTTP middleware that applies preconfigured rate-limiting rules
+// to all received requests.
 func (rl *RateLimiter) RateLimit(next http.Handler) http.Handler {
+	rl.once.Do(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		rl.cancel = cancel
+
+		rl.pathLimits.ForEach(func(p Path, v Limit) {
+			go rl.refill(ctx, p, v)
+		})
+	})
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID := UserID(r.Header.Get("X-User-ID"))
 		path := Path(r.URL.Path)
@@ -166,11 +182,18 @@ func (rl *RateLimiter) RateLimit(next http.Handler) http.Handler {
 			return
 		}
 
-		retryAfter := rl.getRefillInterval(path)
 		w.Header().Add("X-Ratelimit-Remaining", strconv.Itoa(quota))
-		w.Header().Add("X-Ratelimit-Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
 		if quota == 0 {
 			w.WriteHeader(http.StatusTooManyRequests)
+
+			retryAfter, err := rl.getRefillInterval(path)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(err.Error()))
+				return
+			}
+
+			w.Header().Add("X-Ratelimit-Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
 			return
 		}
 

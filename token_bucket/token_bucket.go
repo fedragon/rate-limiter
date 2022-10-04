@@ -161,9 +161,9 @@ func (rl *RateLimiter) refill(ctx context.Context, path Path, limit Limit) {
 	}
 }
 
-// RateLimit is an HTTP middleware that applies preconfigured rate-limiting rules
+// Handle is an HTTP middleware that applies preconfigured rate-limiting rules
 // to all received requests.
-func (rl *RateLimiter) RateLimit(next http.Handler) http.Handler {
+func (rl *RateLimiter) Handle(next http.Handler) http.Handler {
 	rl.once.Do(func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		rl.cancel = cancel

@@ -28,10 +28,11 @@ type (
 		users      *concurrent.Set[UserID]
 	}
 
-	// RateLimiter acts as an HTTP middleware that applies rate limits on configured endpoints.
-	// It starts one or more goroutine that manage the refilling of tokens as soon as the first HTTP request has been
-	// intercepted by its middleware; the refilling goroutines need to be explicitly stopped by invoking the Stop()
-	// method during the HTTP server shutdown process.
+	// RateLimiter acts as an HTTP middleware that rate-limits traffic according to the `token bucket` algorithm, which
+	// means that users can only issue requests at a given rate (configurable by endpoint) and further requests are
+	// dropped until their quota is refilled.
+	// Since it uses goroutines to manage the quota refilling logic, it needs to be explicitly stopped by invoking the
+	// Stop() method during the HTTP server shutdown process.
 	RateLimiter struct {
 		pathLimits *concurrent.Map[Path, Limit]
 		userQuotas *concurrent.Map[UserID, *concurrent.Map[Path, int]]
@@ -93,7 +94,7 @@ func (b *RateLimiterBuilder) Build() (*RateLimiter, error) {
 	return &rl, nil
 }
 
-// Stop stops the refilling goroutines.
+// Stop stops the rate limiter's goroutines, cleaning up all used resources.
 func (rl *RateLimiter) Stop() {
 	rl.cancel()
 }
@@ -117,14 +118,14 @@ func (rl *RateLimiter) decrQuota(userID UserID, path Path) {
 	}
 }
 
-func (rl *RateLimiter) getRefillInterval(path Path) (time.Duration, error) {
+func (rl *RateLimiter) getRefillRate(path Path) (*common.Rate, error) {
 	limit, ok := rl.pathLimits.Get(path)
 
 	if !ok {
-		return 0, fmt.Errorf("unknown path: %v", path)
+		return nil, fmt.Errorf("unknown path: %v", path)
 	}
 
-	return limit.Refill.Interval, nil
+	return &limit.Refill, nil
 }
 
 func (rl *RateLimiter) refillQuotas(path Path, value int, max int) {
@@ -157,8 +158,7 @@ func (rl *RateLimiter) refill(ctx context.Context, path Path, limit Limit) {
 	}
 }
 
-// Handle is an HTTP middleware that applies preconfigured rate-limiting rules
-// to all received requests.
+// Handle returns an HTTP middleware that applies preconfigured rate-limiting rules to all received requests.
 func (rl *RateLimiter) Handle(next http.Handler) http.Handler {
 	rl.once.Do(func() {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -178,18 +178,17 @@ func (rl *RateLimiter) Handle(next http.Handler) http.Handler {
 			return
 		}
 
-		w.Header().Add("X-Ratelimit-Remaining", strconv.Itoa(quota))
 		if quota == 0 {
-			w.WriteHeader(http.StatusTooManyRequests)
-
-			retryAfter, err := rl.getRefillInterval(path)
+			rate, err := rl.getRefillRate(path)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				w.Write([]byte(err.Error()))
 				return
 			}
 
-			w.Header().Add("X-Ratelimit-Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Header().Add("X-Ratelimit-Limit", strconv.Itoa(rate.Value))
+			w.Header().Add("X-Ratelimit-Retry-After", strconv.Itoa(int(rate.Interval.Seconds())))
 			return
 		}
 

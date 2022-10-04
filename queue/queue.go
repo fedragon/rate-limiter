@@ -19,6 +19,11 @@ type Queue struct {
 	rate    *common.Rate
 }
 
+// Rate returns the queue refill rate.
+func (q *Queue) Rate() *common.Rate {
+	return q.rate
+}
+
 // NewQueue returns a new queue.
 func NewQueue(ctx context.Context, rate *common.Rate) *Queue {
 	ctx, cancel := context.WithCancel(ctx)

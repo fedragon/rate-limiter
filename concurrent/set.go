@@ -1,19 +1,19 @@
-package set
+package concurrent
 
 import "sync"
 
-type ConcurrentSet[K comparable] struct {
+type Set[K comparable] struct {
 	content map[K]struct{}
 	mux     sync.RWMutex
 }
 
-func NewConcurrentSet[K comparable]() *ConcurrentSet[K] {
-	return &ConcurrentSet[K]{
+func NewSet[K comparable]() *Set[K] {
+	return &Set[K]{
 		content: make(map[K]struct{}),
 	}
 }
 
-func (s *ConcurrentSet[K]) Contains(key K) bool {
+func (s *Set[K]) Contains(key K) bool {
 	s.mux.RLock()
 	defer s.mux.RUnlock()
 
@@ -21,14 +21,14 @@ func (s *ConcurrentSet[K]) Contains(key K) bool {
 	return exists
 }
 
-func (s *ConcurrentSet[K]) Put(key K) {
+func (s *Set[K]) Put(key K) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
 	s.content[key] = struct{}{}
 }
 
-func (s *ConcurrentSet[K]) ForEach(fn func(key K)) {
+func (s *Set[K]) ForEach(fn func(key K)) {
 	for k := range s.content {
 		fn(k)
 	}

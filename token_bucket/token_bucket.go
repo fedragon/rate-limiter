@@ -2,8 +2,9 @@ package token_bucket
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/fedragon/rate-limiter/set"
+	"github.com/fedragon/rate-limiter/concurrent"
 	"net/http"
 	"strconv"
 	"sync"
@@ -25,12 +26,12 @@ type (
 	}
 
 	RateLimiterBuilder struct {
-		pathLimits map[Path]Limit
-		users      *set.ConcurrentSet[UserID]
+		pathLimits *concurrent.Map[Path, Limit]
+		users      *concurrent.Set[UserID]
 	}
 
 	RateLimiter struct {
-		pathLimits map[Path]Limit
+		pathLimits *concurrent.Map[Path, Limit]
 		userQuotas map[UserID]map[Path]int
 		mux        sync.RWMutex
 		cancel     context.CancelFunc
@@ -39,16 +40,16 @@ type (
 
 func (b *RateLimiterBuilder) SetLimit(path string, limit Limit) *RateLimiterBuilder {
 	if b.pathLimits == nil {
-		b.pathLimits = make(map[Path]Limit)
+		b.pathLimits = concurrent.NewMap[Path, Limit]()
 	}
-	b.pathLimits[Path(path)] = limit
+	b.pathLimits.Put(Path(path), limit)
 
 	return b
 }
 
 func (b *RateLimiterBuilder) RegisterUser(ID string) *RateLimiterBuilder {
 	if b.users == nil {
-		b.users = set.NewConcurrentSet[UserID]()
+		b.users = concurrent.NewSet[UserID]()
 	}
 
 	b.users.Put(UserID(ID))
@@ -56,34 +57,42 @@ func (b *RateLimiterBuilder) RegisterUser(ID string) *RateLimiterBuilder {
 	return b
 }
 
-func (b *RateLimiterBuilder) Build() *RateLimiter {
+func (b *RateLimiterBuilder) Build() (*RateLimiter, error) {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	if b.pathLimits == nil {
+		cancel()
+		return nil, errors.New("no rate limits configured")
+	}
+
 	rl := RateLimiter{
 		pathLimits: b.pathLimits,
 		userQuotas: make(map[UserID]map[Path]int),
 		cancel:     cancel,
 	}
 
-	if b.users != nil {
-		b.users.ForEach(func(u UserID) {
-			for p, v := range b.pathLimits {
-				uqs := rl.userQuotas[u]
+	if b.users == nil {
+		b.users = concurrent.NewSet[UserID]()
+	}
 
-				if uqs == nil {
-					uqs = make(map[Path]int)
-					rl.userQuotas[u] = uqs
-				}
+	b.users.ForEach(func(u UserID) {
+		b.pathLimits.ForEach(func(path Path, limit Limit) {
+			uqs := rl.userQuotas[u]
 
-				uqs[p] = v.Limit.Value
+			if uqs == nil {
+				uqs = make(map[Path]int)
+				rl.userQuotas[u] = uqs
 			}
+
+			uqs[path] = limit.Limit.Value
 		})
-	}
+	})
 
-	for p, v := range b.pathLimits {
+	b.pathLimits.ForEach(func(p Path, v Limit) {
 		go rl.refill(ctx, p, v)
-	}
+	})
 
-	return &rl
+	return &rl, nil
 }
 
 func (rl *RateLimiter) Stop() {
@@ -113,7 +122,12 @@ func (rl *RateLimiter) decrQuota(userID UserID, path Path) {
 }
 
 func (rl *RateLimiter) getRefillInterval(path Path) time.Duration {
-	return rl.pathLimits[path].Refill.Interval
+	limit, ok := rl.pathLimits.Get(path)
+
+	if !ok {
+		return 0
+	}
+	return limit.Refill.Interval
 }
 
 func (rl *RateLimiter) refillQuotas(path Path, value int, max int) {

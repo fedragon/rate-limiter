@@ -26,9 +26,17 @@ var (
 	}
 )
 
+func TestRateLimiterBuilder_Build_FailsIfLimitsAreNotConfigured(t *testing.T) {
+	rlb := RateLimiterBuilder{}
+	rl, err := rlb.Build()
+
+	assert.Nil(t, rl)
+	assert.Error(t, err)
+}
+
 func Test_ServerReturns401_IfUserIsUnknown(t *testing.T) {
 	rlb := RateLimiterBuilder{}
-	rl := rlb.SetLimit(route, limit).Build()
+	rl, _ := rlb.SetLimit(route, limit).Build()
 	defer rl.Stop()
 
 	server := httptest.NewServer(rl.RateLimit(itsOK()))
@@ -43,7 +51,7 @@ func Test_ServerReturns401_IfUserIsUnknown(t *testing.T) {
 
 func Test_ServerReturns200_WhenWithinLimits(t *testing.T) {
 	rlb := RateLimiterBuilder{}
-	rl := rlb.SetLimit(route, limit).RegisterUser(userID).Build()
+	rl, _ := rlb.SetLimit(route, limit).RegisterUser(userID).Build()
 	defer rl.Stop()
 
 	server := httptest.NewServer(rl.RateLimit(itsOK()))
@@ -58,7 +66,7 @@ func Test_ServerReturns200_WhenWithinLimits(t *testing.T) {
 
 func Test_ServerReturns200_AfterRefill(t *testing.T) {
 	rlb := RateLimiterBuilder{}
-	rl := rlb.SetLimit(route, limit).RegisterUser(userID).Build()
+	rl, _ := rlb.SetLimit(route, limit).RegisterUser(userID).Build()
 	defer rl.Stop()
 
 	server := httptest.NewServer(rl.RateLimit(itsOK()))
@@ -81,7 +89,7 @@ func Test_ServerReturns200_AfterRefill(t *testing.T) {
 
 func Test_ServerReturns429_OnTooManyRequests(t *testing.T) {
 	rlb := RateLimiterBuilder{}
-	rl := rlb.SetLimit(route, limit).RegisterUser(userID).Build()
+	rl, _ := rlb.SetLimit(route, limit).RegisterUser(userID).Build()
 	defer rl.Stop()
 
 	server := httptest.NewServer(rl.RateLimit(itsOK()))

@@ -1,4 +1,4 @@
-package set
+package concurrent
 
 import (
 	"github.com/stretchr/testify/assert"
@@ -6,7 +6,7 @@ import (
 )
 
 func TestConcurrentSet_Contains(t *testing.T) {
-	s := NewConcurrentSet[int]()
+	s := NewSet[int]()
 
 	s.content[1] = struct{}{}
 
@@ -14,7 +14,7 @@ func TestConcurrentSet_Contains(t *testing.T) {
 }
 
 func TestConcurrentSet_Put(t *testing.T) {
-	s := NewConcurrentSet[int]()
+	s := NewSet[int]()
 
 	s.Put(1)
 
@@ -23,7 +23,7 @@ func TestConcurrentSet_Put(t *testing.T) {
 
 func TestConcurrentSet_ForEach(t *testing.T) {
 	exists := false
-	s := NewConcurrentSet[int]()
+	s := NewSet[int]()
 	s.Put(1)
 
 	s.ForEach(func(k int) {

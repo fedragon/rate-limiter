@@ -3,6 +3,7 @@ package token_bucket
 import (
 	"context"
 	"fmt"
+	"github.com/fedragon/rate-limiter/set"
 	"net/http"
 	"strconv"
 	"sync"
@@ -25,7 +26,7 @@ type (
 
 	RateLimiterBuilder struct {
 		pathLimits map[Path]Limit
-		users      map[UserID]struct{}
+		users      *set.ConcurrentSet[UserID]
 	}
 
 	RateLimiter struct {
@@ -47,10 +48,10 @@ func (b *RateLimiterBuilder) SetLimit(path string, limit Limit) *RateLimiterBuil
 
 func (b *RateLimiterBuilder) RegisterUser(ID string) *RateLimiterBuilder {
 	if b.users == nil {
-		b.users = make(map[UserID]struct{})
+		b.users = set.NewConcurrentSet[UserID]()
 	}
 
-	b.users[UserID(ID)] = struct{}{}
+	b.users.Put(UserID(ID))
 
 	return b
 }
@@ -63,17 +64,19 @@ func (b *RateLimiterBuilder) Build() *RateLimiter {
 		cancel:     cancel,
 	}
 
-	for u, _ := range b.users {
-		for p, v := range b.pathLimits {
-			uqs := rl.userQuotas[u]
+	if b.users != nil {
+		b.users.ForEach(func(u UserID) {
+			for p, v := range b.pathLimits {
+				uqs := rl.userQuotas[u]
 
-			if uqs == nil {
-				uqs = make(map[Path]int)
-				rl.userQuotas[u] = uqs
+				if uqs == nil {
+					uqs = make(map[Path]int)
+					rl.userQuotas[u] = uqs
+				}
+
+				uqs[p] = v.Limit.Value
 			}
-
-			uqs[p] = v.Limit.Value
-		}
+		})
 	}
 
 	for p, v := range b.pathLimits {

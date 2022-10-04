@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/fedragon/rate-limiter/concurrent"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
+
+	"github.com/fedragon/rate-limiter/concurrent"
 )
 
 type (
@@ -32,8 +32,7 @@ type (
 
 	RateLimiter struct {
 		pathLimits *concurrent.Map[Path, Limit]
-		userQuotas map[UserID]map[Path]int
-		mux        sync.RWMutex
+		userQuotas *concurrent.Map[UserID, *concurrent.Map[Path, int]]
 		cancel     context.CancelFunc
 	}
 )
@@ -67,7 +66,7 @@ func (b *RateLimiterBuilder) Build() (*RateLimiter, error) {
 
 	rl := RateLimiter{
 		pathLimits: b.pathLimits,
-		userQuotas: make(map[UserID]map[Path]int),
+		userQuotas: concurrent.NewMap[UserID, *concurrent.Map[Path, int]](),
 		cancel:     cancel,
 	}
 
@@ -77,14 +76,14 @@ func (b *RateLimiterBuilder) Build() (*RateLimiter, error) {
 
 	b.users.ForEach(func(u UserID) {
 		b.pathLimits.ForEach(func(path Path, limit Limit) {
-			uqs := rl.userQuotas[u]
+			uqs, ok := rl.userQuotas.Get(u)
 
-			if uqs == nil {
-				uqs = make(map[Path]int)
-				rl.userQuotas[u] = uqs
+			if !ok {
+				uqs = concurrent.NewMap[Path, int]()
+				rl.userQuotas.Put(u, uqs)
 			}
 
-			uqs[path] = limit.Limit.Value
+			uqs.Put(path, limit.Limit.Value)
 		})
 	})
 
@@ -100,24 +99,21 @@ func (rl *RateLimiter) Stop() {
 }
 
 func (rl *RateLimiter) getQuota(userID UserID, path Path) (int, bool) {
-	rl.mux.RLock()
-	defer rl.mux.RUnlock()
-	if user, exists := rl.userQuotas[userID]; exists {
-		if quota, exists := user[path]; exists {
-			return quota, true
-		}
+	if user, exists := rl.userQuotas.Get(userID); exists {
+		return user.Get(path)
 	}
 
 	return 0, false
 }
 
 func (rl *RateLimiter) decrQuota(userID UserID, path Path) {
-	rl.mux.Lock()
-	defer rl.mux.Unlock()
-	user := rl.userQuotas[userID]
+	user, ok := rl.userQuotas.Get(userID)
+	if !ok {
+		return
+	}
 
-	if user[path] > 0 {
-		user[path] -= 1
+	if quota, ok := user.Get(path); ok && quota > 0 {
+		user.Put(path, quota-1)
 	}
 }
 
@@ -131,17 +127,15 @@ func (rl *RateLimiter) getRefillInterval(path Path) time.Duration {
 }
 
 func (rl *RateLimiter) refillQuotas(path Path, value int, max int) {
-	rl.mux.Lock()
-	defer rl.mux.Unlock()
-	for _, quotas := range rl.userQuotas {
-		current := quotas[path]
+	rl.userQuotas.ForEach(func(k UserID, quotas *concurrent.Map[Path, int]) {
+		current, _ := quotas.Get(path)
 		next := current + value
 		if next > max {
 			next = max
 		}
 
-		quotas[path] = max
-	}
+		quotas.Put(path, next)
+	})
 }
 
 func (rl *RateLimiter) refill(ctx context.Context, path Path, limit Limit) {

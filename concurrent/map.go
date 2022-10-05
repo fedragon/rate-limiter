@@ -13,23 +13,33 @@ func NewMap[K comparable, V any]() *Map[K, V] {
 	}
 }
 
-func (s *Map[K, V]) Get(key K) (V, bool) {
-	s.mux.RLock()
-	defer s.mux.RUnlock()
+func (m *Map[K, V]) Get(key K) (V, bool) {
+	m.mux.RLock()
+	defer m.mux.RUnlock()
 
-	value, exists := s.content[key]
+	value, exists := m.content[key]
 	return value, exists
 }
 
-func (s *Map[K, V]) Put(key K, value V) {
-	s.mux.Lock()
-	defer s.mux.Unlock()
+func (m *Map[K, V]) Put(key K, value V) {
+	m.mux.Lock()
+	defer m.mux.Unlock()
 
-	s.content[key] = value
+	m.content[key] = value
 }
 
-func (s *Map[K, V]) ForEach(fn func(key K, value V)) {
-	for k, v := range s.content {
+func (m *Map[K, V]) ForEach(fn func(key K, value V)) {
+	m.mux.Lock()
+	defer m.mux.Unlock()
+
+	for k, v := range m.content {
 		fn(k, v)
 	}
+}
+
+func (m *Map[K, V]) Size() int {
+	m.mux.RLock()
+	defer m.mux.RUnlock()
+
+	return len(m.content)
 }

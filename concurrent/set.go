@@ -29,7 +29,17 @@ func (s *Set[K]) Put(key K) {
 }
 
 func (s *Set[K]) ForEach(fn func(key K)) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+
 	for k := range s.content {
 		fn(k)
 	}
+}
+
+func (s *Set[K]) Size() int {
+	s.mux.RLock()
+	defer s.mux.RUnlock()
+
+	return len(s.content)
 }

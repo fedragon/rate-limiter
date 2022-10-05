@@ -41,41 +41,36 @@ type (
 	}
 )
 
+// NewRateLimiterBuilder instantiates a rate limiter builder.
+func NewRateLimiterBuilder() *RateLimiterBuilder {
+	return &RateLimiterBuilder{
+		pathLimits: concurrent.NewMap[Path, Limit](),
+		users:      concurrent.NewSet[UserID](),
+	}
+}
+
 // SetLimit sets a limit on a path. The path needs to be absolute and should start with a leading '/'.
 func (b *RateLimiterBuilder) SetLimit(path string, limit Limit) *RateLimiterBuilder {
-	if b.pathLimits == nil {
-		b.pathLimits = concurrent.NewMap[Path, Limit]()
-	}
 	b.pathLimits.Put(Path(path), limit)
-
 	return b
 }
 
 // RegisterUser registers a user.
 func (b *RateLimiterBuilder) RegisterUser(ID string) *RateLimiterBuilder {
-	if b.users == nil {
-		b.users = concurrent.NewSet[UserID]()
-	}
-
 	b.users.Put(UserID(ID))
-
 	return b
 }
 
 // Build builds a rate limiter, setting quotas for each configured user and path.
 // It returns an error if no limits have been configured.
 func (b *RateLimiterBuilder) Build() (*RateLimiter, error) {
-	if b.pathLimits == nil {
+	if b.pathLimits.Size() == 0 {
 		return nil, errors.New("no rate limits configured")
 	}
 
 	rl := RateLimiter{
 		pathLimits: b.pathLimits,
 		userQuotas: concurrent.NewMap[UserID, *concurrent.Map[Path, int]](),
-	}
-
-	if b.users == nil {
-		b.users = concurrent.NewSet[UserID]()
 	}
 
 	b.users.ForEach(func(u UserID) {

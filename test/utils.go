@@ -1,6 +1,10 @@
 package test
 
-import "net/http"
+import (
+	"math/rand"
+	"net/http"
+	"time"
+)
 
 // ItsOK returns an HTTP handler for testing purposes, that always responds with 200 OK.
 func ItsOK() http.Handler {
@@ -8,4 +12,9 @@ func ItsOK() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		return
 	})
+}
+
+// RandomDuration returns a random duration between 0 and 50ms.
+func RandomDuration() time.Duration {
+	return time.Duration(rand.Int31n(51)) * time.Millisecond
 }

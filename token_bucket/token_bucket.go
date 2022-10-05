@@ -73,8 +73,10 @@ func (b *RateLimiterBuilder) Build() (*RateLimiter, error) {
 		userQuotas: concurrent.NewMap[UserID, *concurrent.Map[Path, int]](),
 	}
 
-	b.users.ForEach(func(u UserID) {
-		b.pathLimits.ForEach(func(path Path, limit Limit) {
+	for u := range b.users.Iterate() {
+		for t := range b.pathLimits.Iterate() {
+			path := t.Key
+			limit := t.Value
 			uqs, ok := rl.userQuotas.Get(u)
 
 			if !ok {
@@ -83,8 +85,8 @@ func (b *RateLimiterBuilder) Build() (*RateLimiter, error) {
 			}
 
 			uqs.Put(path, limit.Limit.Value)
-		})
-	})
+		}
+	}
 
 	return &rl, nil
 }
@@ -124,7 +126,8 @@ func (rl *RateLimiter) getRefillRate(path Path) (*common.Rate, error) {
 }
 
 func (rl *RateLimiter) refillQuotas(path Path, value int, max int) {
-	rl.userQuotas.ForEach(func(k UserID, quotas *concurrent.Map[Path, int]) {
+	for t := range rl.userQuotas.Iterate() {
+		quotas := t.Value
 		current, _ := quotas.Get(path)
 		next := current + value
 		if next > max {
@@ -132,7 +135,7 @@ func (rl *RateLimiter) refillQuotas(path Path, value int, max int) {
 		}
 
 		quotas.Put(path, next)
-	})
+	}
 }
 
 func (rl *RateLimiter) refill(ctx context.Context, path Path, limit Limit) {
@@ -159,9 +162,9 @@ func (rl *RateLimiter) Handle(next http.Handler) http.Handler {
 		ctx, cancel := context.WithCancel(context.Background())
 		rl.cancel = cancel
 
-		rl.pathLimits.ForEach(func(p Path, v Limit) {
-			go rl.refill(ctx, p, v)
-		})
+		for t := range rl.pathLimits.Iterate() {
+			go rl.refill(ctx, t.Key, t.Value)
+		}
 	})
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

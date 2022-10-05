@@ -2,11 +2,12 @@ package leaking_bucket
 
 import (
 	"context"
-	"github.com/fedragon/rate-limiter/common"
-	q "github.com/fedragon/rate-limiter/queue"
 	"net/http"
 	"strconv"
 	"sync"
+
+	"github.com/fedragon/rate-limiter/common"
+	q "github.com/fedragon/rate-limiter/queue"
 )
 
 // RateLimiter acts as an HTTP middleware that rate-limits traffic according to the `leaking bucket` algorithm, which

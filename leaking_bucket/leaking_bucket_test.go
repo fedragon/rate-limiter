@@ -1,13 +1,14 @@
 package leaking_bucket
 
 import (
-	"github.com/fedragon/rate-limiter/common"
-	"github.com/fedragon/rate-limiter/test"
-	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/fedragon/rate-limiter/common"
+	"github.com/fedragon/rate-limiter/test"
+	"github.com/stretchr/testify/assert"
 )
 
 const (

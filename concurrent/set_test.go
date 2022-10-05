@@ -1,7 +1,8 @@
 package concurrent
 
 import (
-	"math/rand"
+	"context"
+	"github.com/fedragon/rate-limiter/test"
 	"sync"
 	"testing"
 	"time"
@@ -25,27 +26,13 @@ func TestSet_Put(t *testing.T) {
 	assert.True(t, s.Contains(1))
 }
 
-func TestSet_ForEach(t *testing.T) {
-	exists := false
-	s := NewSet[int]()
-	s.Put(1)
-
-	s.ForEach(func(k int) {
-		if k == 1 {
-			exists = true
-		}
-	})
-
-	assert.True(t, exists)
-}
-
 func TestSet_ConcurrentPut(t *testing.T) {
 	s := NewSet[int]()
 	key := 1
 	producer := func(wg *sync.WaitGroup, s *Set[int]) {
 		defer wg.Done()
 		for i := 0; i < 10; i++ {
-			time.Sleep(time.Duration(rand.Int31n(50)) * time.Millisecond)
+			time.Sleep(test.RandomDuration())
 			s.Put(key)
 		}
 	}
@@ -66,7 +53,7 @@ func TestSet_ConcurrentContains(t *testing.T) {
 	consumer := func(wg *sync.WaitGroup, s *Set[int]) {
 		defer wg.Done()
 		for i := 0; i < 10; i++ {
-			time.Sleep(time.Duration(rand.Int31n(50)) * time.Millisecond)
+			time.Sleep(test.RandomDuration())
 			s.Contains(key)
 		}
 	}
@@ -79,4 +66,49 @@ func TestSet_ConcurrentContains(t *testing.T) {
 	go consumer(&wg, s)
 	go consumer(&wg, s)
 	wg.Wait()
+}
+
+func TestSet_Size(t *testing.T) {
+	m := NewSet[int]()
+
+	assert.Zero(t, m.Size())
+
+	m.Put(1)
+	m.Put(2)
+
+	assert.Equal(t, 2, m.Size())
+}
+
+func TestSet_ConcurrentSize(t *testing.T) {
+	m := NewSet[int]()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	client := func(ctx context.Context, m *Set[int]) {
+		for {
+			time.Sleep(test.RandomDuration())
+			m.Size()
+		}
+	}
+
+	go client(ctx, m)
+	go client(ctx, m)
+	go client(ctx, m)
+}
+
+func TestSet_ConcurrentIterate(t *testing.T) {
+	m := NewSet[int]()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	client := func(ctx context.Context, m *Set[int]) {
+		for {
+			time.Sleep(test.RandomDuration())
+			m.Iterate()
+		}
+	}
+
+	go client(ctx, m)
+	go client(ctx, m)
+	go client(ctx, m)
 }

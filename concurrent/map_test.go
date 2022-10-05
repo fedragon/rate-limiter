@@ -1,7 +1,8 @@
 package concurrent
 
 import (
-	"math/rand"
+	"context"
+	"github.com/fedragon/rate-limiter/test"
 	"sync"
 	"testing"
 	"time"
@@ -45,7 +46,7 @@ func TestMap_ConcurrentPut(t *testing.T) {
 	producer := func(wg *sync.WaitGroup, m *Map[int, string], out chan<- msg, value string) {
 		defer wg.Done()
 		for i := 0; i < 10; i++ {
-			time.Sleep(time.Duration(rand.Int31n(50)) * time.Millisecond)
+			time.Sleep(test.RandomDuration())
 			m.Put(key, value)
 			out <- msg{value, time.Now()}
 		}
@@ -72,7 +73,7 @@ func TestMap_ConcurrentGet(t *testing.T) {
 	consumer := func(wg *sync.WaitGroup, m *Map[int, string], out chan<- msg) {
 		defer wg.Done()
 		for i := 0; i < 10; i++ {
-			time.Sleep(time.Duration(rand.Int31n(50)) * time.Millisecond)
+			time.Sleep(test.RandomDuration())
 			value, _ := m.Get(key)
 			out <- msg{value, time.Now()}
 		}
@@ -91,20 +92,49 @@ func TestMap_ConcurrentGet(t *testing.T) {
 	assert.Equal(t, expected, mostRecent(outputs))
 }
 
-func TestMap_ForEach(t *testing.T) {
-	var got string
+func TestMap_Size(t *testing.T) {
 	m := NewMap[int, string]()
-	key := 1
-	expected := "a"
-	m.Put(key, expected)
 
-	m.ForEach(func(k int, v string) {
-		if k == 1 {
-			got = v
+	assert.Zero(t, m.Size())
+
+	m.Put(1, "a")
+	m.Put(2, "b")
+
+	assert.Equal(t, 2, m.Size())
+}
+
+func TestMap_ConcurrentSize(t *testing.T) {
+	m := NewMap[int, string]()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	client := func(ctx context.Context, m *Map[int, string]) {
+		for {
+			time.Sleep(test.RandomDuration())
+			m.Size()
 		}
-	})
+	}
 
-	assert.Equal(t, expected, got)
+	go client(ctx, m)
+	go client(ctx, m)
+	go client(ctx, m)
+}
+
+func TestMap_ConcurrentIterate(t *testing.T) {
+	m := NewMap[int, string]()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	client := func(ctx context.Context, m *Map[int, string]) {
+		for {
+			time.Sleep(test.RandomDuration())
+			m.Iterate()
+		}
+	}
+
+	go client(ctx, m)
+	go client(ctx, m)
+	go client(ctx, m)
 }
 
 func mostRecent(msgs <-chan msg) string {

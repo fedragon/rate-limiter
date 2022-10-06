@@ -21,7 +21,7 @@ func main() {
 		RegisterUser("0-0-0-0-0").
 		SetLimit(
 			"/",
-			token_bucket.Limit{
+			token_bucket.Config{
 				Limit:  rate,
 				Refill: rate,
 			}).

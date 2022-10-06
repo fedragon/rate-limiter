@@ -17,15 +17,15 @@ type (
 	Path   string
 	UserID string
 
-	Limit struct {
+	Config struct {
 		Limit  common.Rate
 		Refill common.Rate
 	}
 
 	// RateLimiterBuilder builds a rate limiter.
 	RateLimiterBuilder struct {
-		pathLimits *concurrent.Map[Path, Limit]
-		users      *concurrent.Set[UserID]
+		paths *concurrent.Map[Path, Config]
+		users *concurrent.Set[UserID]
 	}
 
 	// RateLimiter acts as an HTTP middleware that rate-limits traffic according to the `token bucket` algorithm, which
@@ -34,7 +34,7 @@ type (
 	// Since it uses goroutines to manage the quota refilling logic, it needs to be explicitly stopped by invoking the
 	// Stop() method during the HTTP server shutdown process.
 	RateLimiter struct {
-		pathLimits *concurrent.Map[Path, Limit]
+		paths      *concurrent.Map[Path, Config]
 		userQuotas *concurrent.Map[UserID, *concurrent.Map[Path, int]]
 		cancel     context.CancelFunc
 		once       sync.Once
@@ -44,14 +44,14 @@ type (
 // NewRateLimiterBuilder instantiates a rate limiter builder.
 func NewRateLimiterBuilder() *RateLimiterBuilder {
 	return &RateLimiterBuilder{
-		pathLimits: concurrent.NewMap[Path, Limit](),
-		users:      concurrent.NewSet[UserID](),
+		paths: concurrent.NewMap[Path, Config](),
+		users: concurrent.NewSet[UserID](),
 	}
 }
 
-// SetLimit sets a limit on a path. The path needs to be absolute and should start with a leading '/'.
-func (b *RateLimiterBuilder) SetLimit(path string, limit Limit) *RateLimiterBuilder {
-	b.pathLimits.Put(Path(path), limit)
+// SetLimit sets a limit on a path. The path needs to be absolute and start with a leading '/'.
+func (b *RateLimiterBuilder) SetLimit(path string, cfg Config) *RateLimiterBuilder {
+	b.paths.Put(Path(path), cfg)
 	return b
 }
 
@@ -64,17 +64,17 @@ func (b *RateLimiterBuilder) RegisterUser(ID string) *RateLimiterBuilder {
 // Build builds a rate limiter, setting quotas for each configured user and path.
 // It returns an error if no limits have been configured.
 func (b *RateLimiterBuilder) Build() (*RateLimiter, error) {
-	if b.pathLimits.Size() == 0 {
-		return nil, errors.New("no rate limits configured")
+	if b.paths.Size() == 0 {
+		return nil, errors.New("no rate limit configured")
 	}
 
 	rl := RateLimiter{
-		pathLimits: b.pathLimits,
+		paths:      b.paths,
 		userQuotas: concurrent.NewMap[UserID, *concurrent.Map[Path, int]](),
 	}
 
 	for u := range b.users.Iterate() {
-		for t := range b.pathLimits.Iterate() {
+		for t := range b.paths.Iterate() {
 			path := t.Key
 			limit := t.Value
 			uqs, ok := rl.userQuotas.Get(u)
@@ -91,7 +91,7 @@ func (b *RateLimiterBuilder) Build() (*RateLimiter, error) {
 	return &rl, nil
 }
 
-// Stop stops the rate limiter's goroutines, cleaning up all used resources.
+// Stop stops the rate limiter, cleaning up all used resources.
 func (rl *RateLimiter) Stop() {
 	rl.cancel()
 }
@@ -116,7 +116,7 @@ func (rl *RateLimiter) decrQuota(userID UserID, path Path) {
 }
 
 func (rl *RateLimiter) getRefillRate(path Path) (*common.Rate, error) {
-	limit, ok := rl.pathLimits.Get(path)
+	limit, ok := rl.paths.Get(path)
 
 	if !ok {
 		return nil, fmt.Errorf("unknown path: %v", path)
@@ -125,24 +125,11 @@ func (rl *RateLimiter) getRefillRate(path Path) (*common.Rate, error) {
 	return &limit.Refill, nil
 }
 
-func (rl *RateLimiter) refillQuotas(path Path, value int, max int) {
-	for t := range rl.userQuotas.Iterate() {
-		quotas := t.Value
-		current, _ := quotas.Get(path)
-		next := current + value
-		if next > max {
-			next = max
-		}
-
-		quotas.Put(path, next)
-	}
-}
-
-func (rl *RateLimiter) refill(ctx context.Context, path Path, limit Limit) {
-	ticker := time.NewTicker(limit.Limit.Interval)
+func (rl *RateLimiter) refill(ctx context.Context, path Path, limit Config) {
+	ticker := time.NewTicker(limit.Refill.Interval)
 	defer ticker.Stop()
 
-	fmt.Printf("starting refiller for path '%v'\n", path)
+	fmt.Printf("starting refiller for path '%v' at interval %v\n", path, limit.Refill.Interval)
 
 	for {
 		select {
@@ -150,7 +137,16 @@ func (rl *RateLimiter) refill(ctx context.Context, path Path, limit Limit) {
 			fmt.Printf("stopping refiller for path '%v'\n", path)
 			return
 		case <-ticker.C:
-			rl.refillQuotas(path, limit.Refill.Value, limit.Limit.Value)
+			for t := range rl.userQuotas.Iterate() {
+				quotas := t.Value
+				current, _ := quotas.Get(path)
+				next := current + limit.Refill.Value
+				if next > limit.Limit.Value {
+					next = limit.Limit.Value
+				}
+
+				quotas.Put(path, next)
+			}
 		default:
 		}
 	}
@@ -162,7 +158,7 @@ func (rl *RateLimiter) Handle(next http.Handler) http.Handler {
 		ctx, cancel := context.WithCancel(context.Background())
 		rl.cancel = cancel
 
-		for t := range rl.pathLimits.Iterate() {
+		for t := range rl.paths.Iterate() {
 			go rl.refill(ctx, t.Key, t.Value)
 		}
 	})

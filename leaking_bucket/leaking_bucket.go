@@ -30,7 +30,7 @@ func NewRateLimiter(rate *common.Rate) *RateLimiter {
 	}
 }
 
-// Stop stops the rate limiter's goroutines, cleaning up all used resources.
+// Stop stops the rate limiter, cleaning up all used resources.
 func (rl *RateLimiter) Stop() {
 	rl.cancel()
 }

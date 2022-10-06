@@ -41,7 +41,7 @@ func (s *Set[V]) Size() int {
 	return len(s.content)
 }
 
-// Iterate returns a channel prepopulated with all the values contained in this set.
+// Iterate returns a buffered channel pre-populated with all the values contained in this set.
 func (s *Set[V]) Iterate() <-chan V {
 	s.mux.RLock()
 	defer s.mux.RUnlock()

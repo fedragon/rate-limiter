@@ -17,7 +17,7 @@ const (
 )
 
 var (
-	limit = Limit{
+	limit = Config{
 		Limit: common.Rate{
 			Value:    1,
 			Interval: time.Second,

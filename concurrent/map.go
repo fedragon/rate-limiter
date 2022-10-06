@@ -46,7 +46,7 @@ func (m *Map[K, V]) Size() int {
 	return len(m.content)
 }
 
-// Iterate returns a channel prepopulated with all the tuples contained in this map.
+// Iterate returns a buffered channel pre-populated with all the tuples contained in this map.
 func (m *Map[K, V]) Iterate() <-chan Tuple[K, V] {
 	m.mux.RLock()
 	defer m.mux.RUnlock()

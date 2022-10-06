@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -28,13 +30,23 @@ func main() {
 			return
 		}),
 	)
+	server := &http.Server{
+		Addr:    ":3000",
+		Handler: handler,
+	}
 
 	go func() {
-		if err := http.ListenAndServe("0.0.0.0:3000", handler); err != nil {
+		if err := server.ListenAndServe(); err != nil {
 			log.Fatal(err)
 			return
 		}
 	}()
 
 	<-shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		fmt.Println(err)
+	}
 }

@@ -11,6 +11,9 @@ import (
 
 	"github.com/fedragon/rate-limiter/common"
 	"github.com/fedragon/rate-limiter/concurrent"
+	"github.com/fedragon/rate-limiter/logging"
+
+	"go.uber.org/zap"
 )
 
 type (
@@ -126,15 +129,17 @@ func (rl *RateLimiter) getRefillRate(path Path) (*common.Rate, error) {
 }
 
 func (rl *RateLimiter) refill(ctx context.Context, path Path, limit Config) {
+	log := logging.Logger()
+
 	ticker := time.NewTicker(limit.Refill.Interval)
 	defer ticker.Stop()
 
-	fmt.Printf("starting refiller for path '%v' at interval %v\n", path, limit.Refill.Interval)
+	log.Debug("starting refiller", zap.String("path", string(path)), zap.Duration("interval", limit.Refill.Interval))
 
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Printf("stopping refiller for path '%v'\n", path)
+			log.Debug("stopping refiller", zap.String("path", string(path)))
 			return
 		case <-ticker.C:
 			for t := range rl.userQuotas.Iterate() {

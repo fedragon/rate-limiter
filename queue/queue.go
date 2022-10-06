@@ -2,7 +2,8 @@ package queue
 
 import (
 	"context"
-	"fmt"
+	"github.com/fedragon/rate-limiter/logging"
+	"go.uber.org/zap"
 	"time"
 
 	"github.com/fedragon/rate-limiter/common"
@@ -42,21 +43,23 @@ func NewQueue(ctx context.Context, rate *common.Rate) *Queue {
 
 // Start starts the queue refilling logic.
 func (q *Queue) Start() {
-	fmt.Println("starting queue")
+	log := logging.Logger()
+
+	log.Debug("starting queue", zap.Duration("refill_interval", q.rate.Interval))
 	t := time.NewTicker(q.rate.Interval)
 	defer t.Stop()
 
 	for {
 		select {
 		case <-q.ctx.Done():
-			fmt.Println("stopping queue")
+			log.Debug("stopping queue")
 			close(q.content)
 			return
 		case <-t.C:
 			for i := 0; i < q.rate.Value; i++ {
 				select {
 				case q.content <- struct{}{}:
-					fmt.Println("refilling queue")
+					log.Debug("refilling queue")
 				default:
 					// buffer is full
 				}

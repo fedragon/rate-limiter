@@ -20,7 +20,7 @@ func main() {
 	defer rateLimiter.Stop()
 
 	shutdown := make(chan os.Signal, 1)
-	signal.Notify(shutdown, os.Interrupt)
+	signal.Notify(shutdown, os.Interrupt, os.Kill)
 
 	handler := rateLimiter.Handle(
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
